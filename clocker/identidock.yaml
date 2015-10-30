@@ -1,0 +1,37 @@
+id: clocker-demo-application
+name: "Clocker Demo Application"
+
+location: my-docker-cloud
+
+services:
+- type: docker:redis:3
+  id: redis
+  name: "Redis Store"
+  openPorts:
+  - 6379
+
+- type: docker:amouat/dnmonster:1.0
+  id: dnmonster
+  name: "DNMonster Service"
+  openPorts:
+  - 8080
+
+- type: docker:amouat/identidock:1.0
+  id: identidock
+  name: "IdentiDock WebApp"
+  portBindings:
+    80: 9090
+  links:
+  - $brooklyn:component("redis")
+  - $brooklyn:component("dnmonster")
+
+  brooklyn.enrichers:
+  - type: org.apache.brooklyn.enricher.stock.Transformer
+    brooklyn.config:
+      uniqueTag: url-generator
+      enricher.sourceSensor: host.name
+      enricher.targetSensor: main.uri
+      enricher.targetValue:
+        $brooklyn:formatString:
+        - "http://%s/" 
+        - $brooklyn:attributeWhenReady("host.name")

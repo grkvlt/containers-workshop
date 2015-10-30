@@ -1,0 +1,27 @@
+id: clocker-demo-application-vm
+name: "Clocker Demo Application with VM"
+
+services:
+- type: org.apache.brooklyn.entity.nosql.redis.RedisStore
+  location: byon(hosts='clocker-3')
+  id: redis
+  name: "Redis"
+  install.version: 3.0.0
+  start.timeout: 10m
+
+- type: docker:amouat/dnmonster:1.0
+  location: my-docker-cloud
+  id: dnmonster
+  name: "DNMonster"
+  openPorts:
+  - 8080
+
+- type: docker:amouat/identidock:1.0
+  location: my-docker-cloud
+  id: identidock
+  name: "IdentiDock"
+  portBindings:
+    80: 9090
+  links:
+  - $brooklyn:component("redis")
+  - $brooklyn:component("dnmonster")
