@@ -1,0 +1,65 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# vm configuration
+CALICO_VERSION = "v0.4.9"
+NODES = 2
+PRIMARY_IP = "172.17.8.101"
+MEMORY = 2048
+CPUS = 2
+
+Vagrant.configure(2) do |config|
+  (1..NODES).each do |i|
+    config.vm.define "calico-#{i}" do |node|
+      node.vm.box = "ubuntu/vivid64"
+      node.vm.box_url = "https://cloud-images.ubuntu.com/vagrant/vivid/current/vivid-server-cloudimg-amd64-vagrant-disk1.box"
+      node.vm.box_check_update = true
+      node.vm.hostname = "calico-#{i}"
+      node.vm.network :private_network, ip: "172.17.8.10#{i}"
+
+      # setup vm
+      node.vm.provider :virtualbox do |v|
+        v.name = "calico-#{i}"
+        v.memory = MEMORY
+        v.cpus = CPUS
+      end
+
+      # setup ssh
+      node.ssh.insert_key = false
+      node.ssh.private_key_path = [ "~/.ssh/id_rsa", "~/.vagrant.d/insecure_private_key" ]
+      node.vm.provision :file, source: "~/.ssh/id_rsa.pub", destination: "~/.ssh/authorized_keys"
+
+      # fix sudo
+      node.vm.provision "fix-no-tty", type: "shell" do |s|
+        s.privileged = false
+        s.inline = "sudo sed -i '/tty/!s/mesg n/tty -s \\&\\& mesg n/' /root/.profile"
+      end
+
+      # provision docker
+      node.vm.provision :docker, images: [
+          "busybox:latest",
+          "ubuntu:14.04",
+          "ubuntu:15.04",
+          "calico/node:#{CALICO_VERSION}"
+      ]
+
+      # start etcd on first host
+      if i == 1
+        node.vm.provision :docker do |d|
+          d.run "quay.io/coreos/etcd",
+            args: "--net=host",
+            cmd: "--advertise-client-urls http://#{PRIMARY_IP}:4001 "\
+                 "--listen-client-urls http://0.0.0.0:4001 "
+        end
+      end
+      node.vm.provision :shell, inline: %Q|echo 'export ETCD_AUTHORITY="#{PRIMARY_IP}:4001"' >> /home/vagrant/.profile|
+      node.vm.provision :shell, inline: %Q|sudo sh -c 'echo "Defaults env_keep +=\"ETCD_AUTHORITY\"" >>/etc/sudoers'|
+
+      # start calico node
+      node.vm.provision :shell, inline: "wget -qO /usr/local/bin/calicoctl https://github.com/projectcalico/calico-docker/releases/download/#{CALICO_VERSION}/calicoctl ; chmod +x /usr/local/bin/calicoctl", :privileged => true
+      node.vm.provision :shell, inline: %Q|calicoctl checksystem --fix ; ETCD_AUTHORITY="#{PRIMARY_IP}:4001" calicoctl node --ip=172.17.8.10#{i}|, :privileged => true
+      node.vm.provision :shell, inline: %Q|echo 'export DOCKER_HOST="localhost:2377"' >> /home/vagrant/.profile|
+      node.vm.provision :shell, inline: %Q|sudo sh -c 'echo "Defaults env_keep +=\"DOCKER_HOST\"" >>/etc/sudoers'|
+    end
+  end
+end
